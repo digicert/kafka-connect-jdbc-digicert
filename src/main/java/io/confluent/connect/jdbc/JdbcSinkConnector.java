@@ -51,6 +51,7 @@ public class JdbcSinkConnector extends SinkConnector {
     log.info("Setting task configurations for {} workers.", maxTasks);
     final List<Map<String, String>> configs = new ArrayList<>(maxTasks);
     for (int i = 0; i < maxTasks; ++i) {
+      //dummy
       configs.add(configProps);
     }
     return configs;
