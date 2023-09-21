@@ -15,9 +15,17 @@
 
 package io.confluent.connect.jdbc.source;
 
-import java.sql.SQLNonTransientException;
-import java.util.TimeZone;
+import io.confluent.connect.jdbc.dialect.DatabaseDialect;
+import io.confluent.connect.jdbc.dialect.DatabaseDialects;
+import io.confluent.connect.jdbc.source.JdbcSourceConnectorConfig.TransactionIsolationMode;
+import io.confluent.connect.jdbc.util.*;
+import org.apache.kafka.clients.producer.KafkaProducer;
+import org.apache.kafka.clients.producer.Producer;
+import org.apache.kafka.clients.producer.ProducerConfig;
+import org.apache.kafka.clients.producer.ProducerRecord;
+import org.apache.kafka.common.PartitionInfo;
 import org.apache.kafka.common.config.ConfigException;
+import org.apache.kafka.common.serialization.StringSerializer;
 import org.apache.kafka.common.utils.SystemTime;
 import org.apache.kafka.common.utils.Time;
 import org.apache.kafka.connect.errors.ConnectException;
@@ -27,31 +35,14 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.sql.Connection;
+import java.sql.ResultSetMetaData;
 import java.sql.SQLException;
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.Calendar;
-import java.util.Collections;
-import java.util.HashMap;
-import java.util.HashSet;
-import java.util.List;
-import java.util.Locale;
-import java.util.Map;
-import java.util.PriorityQueue;
-import java.util.Set;
+import java.sql.SQLNonTransientException;
+import java.util.*;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Function;
 import java.util.stream.Collectors;
-
-import io.confluent.connect.jdbc.dialect.DatabaseDialect;
-import io.confluent.connect.jdbc.dialect.DatabaseDialects;
-import io.confluent.connect.jdbc.util.CachedConnectionProvider;
-import io.confluent.connect.jdbc.util.ColumnDefinition;
-import io.confluent.connect.jdbc.util.ColumnId;
-import io.confluent.connect.jdbc.util.TableId;
-import io.confluent.connect.jdbc.util.Version;
-import io.confluent.connect.jdbc.source.JdbcSourceConnectorConfig.TransactionIsolationMode;
 
 /**
  * JdbcSourceTask is a Kafka Connect SourceTask implementation that reads from JDBC databases and
@@ -74,6 +65,10 @@ public class JdbcSourceTask extends SourceTask {
 
   int maxRetriesPerQuerier;
 
+  private String bootstrapServer;
+  private String errorTopic;
+  private Producer<String, String> kafkaProducer;
+
   public JdbcSourceTask() {
     this.time = new SystemTime();
   }
@@ -94,6 +89,16 @@ public class JdbcSourceTask extends SourceTask {
       config = new JdbcSourceTaskConfig(properties);
     } catch (ConfigException e) {
       throw new ConfigException("Couldn't start JdbcSourceTask due to configuration error", e);
+    }
+
+    // Digicert
+    bootstrapServer = properties.get("digicert.error.topic.bootstrap.servers");
+    errorTopic = properties.get("digicert.error.topic.name");
+    try {
+      kafkaProducer = getKafkaProducer();
+    }
+    catch (Exception ex){
+      log.info("Error while creating kafka producer", ex);
     }
 
     List<String> tables = config.getList(JdbcSourceTaskConfig.TABLES_CONFIG);
@@ -438,7 +443,16 @@ public class JdbcSourceTask extends SourceTask {
         int batchMaxRows = config.getInt(JdbcSourceTaskConfig.BATCH_MAX_ROWS_CONFIG);
         boolean hadNext = true;
         while (results.size() < batchMaxRows && (hadNext = querier.next())) {
-          results.add(querier.extractRecord());
+          try {
+            results.add(querier.extractRecord());
+          } catch (Exception ex) {
+            log.error("Transaction id : " + querier.resultSet.getString("transaction_id")
+                    + " :: Exception: " + ex.getMessage());
+            RecordError recordError = new RecordError();
+            recordError.setError(ex.getMessage());
+            recordError.setRecord(getErrorRecord(querier));
+            addErrorRecord(kafkaProducer, recordError);
+          }
         }
         querier.resetRetryCount();
 
@@ -501,6 +515,60 @@ public class JdbcSourceTask extends SourceTask {
 
     shutdown();
     return null;
+  }
+
+  // Digicert
+  private String getErrorRecord(TableQuerier querier){
+    String errorRecord = null;
+    try {
+      ResultSetMetaData metaData = querier.resultSet.getMetaData();
+      int columnCount = metaData.getColumnCount();
+      StringBuilder jsonLikeString = new StringBuilder("{\n");
+      for (int i = 1; i <= columnCount; i++) {
+        String columnName = metaData.getColumnName(i);
+        Object columnValue = querier.resultSet.getObject(i);
+        // Append the column name and value to the JSON-like string
+        jsonLikeString.append("\"").append(columnName).append("\":\"").append(columnValue).append("\",\n");
+      }
+      // Remove the trailing comma and close the JSON-like string
+      jsonLikeString.delete(jsonLikeString.length() - 2, jsonLikeString.length()); // Remove last comma and newline
+      jsonLikeString.append("\n}\n");
+      errorRecord = jsonLikeString.toString();
+    }
+    catch (Exception e){
+      log.error("Exception while creating error record", e);
+    }
+    return errorRecord;
+  }
+  private void addErrorRecord(Producer<String, String> kafkaProducer, RecordError message) {
+    if (kafkaProducer == null) {
+      log.error("Kafka producer is null");
+      return;
+    }
+    try {
+      kafkaProducer.send(new ProducerRecord<>(errorTopic, message.toString()));
+    }
+    catch (Exception ex){
+      log.error("Unable to send message to kafka topic : {}", message.toString());
+    }
+  }
+  private Producer<String, String> getKafkaProducer() {
+    KafkaProducer<String, String> kafkaProducer = new KafkaProducer<>(getProperties());
+    checkConnectivity(kafkaProducer);
+    return kafkaProducer;
+  }
+  private void checkConnectivity(KafkaProducer<String, String> kafkaProducer) {
+    List<PartitionInfo> partitionInfos = kafkaProducer.partitionsFor(errorTopic);
+    for( PartitionInfo info : partitionInfos){
+      log.info("Kafka producer is connected to topic: {} and partition: {}",info.topic(),info.partition());
+    }
+  }
+  private Properties getProperties() {
+    Properties props = new Properties();
+    props.put(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG, StringSerializer.class.getName());
+    props.put(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, StringSerializer.class.getName());
+    props.put(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, bootstrapServer);
+    return props;
   }
 
   private void shutdown() {
@@ -573,6 +641,42 @@ public class JdbcSourceTask extends SourceTask {
     } catch (SQLException e) {
       throw new ConnectException("Failed trying to validate that columns used for offsets are NOT"
                                  + " NULL", e);
+    }
+  }
+
+  public class RecordError {
+    String record;
+    String error;
+
+    // Getter for the 'record' field
+    public String getRecord() {
+      return record;
+    }
+
+    // Setter for the 'record' field
+    public void setRecord(String record) {
+      this.record = record;
+    }
+
+    // Getter for the 'error' field
+    public String getError() {
+      return error;
+    }
+
+    // Setter for the 'error' field
+    public void setError(String error) {
+      this.error = error;
+    }
+
+    @Override
+    public String toString() {
+      // Construct a string manually with a newline after each field
+      StringBuilder jsonString = new StringBuilder();
+      jsonString.append("{\n");
+      jsonString.append("\"record\" : \"").append(record).append("\",\n");
+      jsonString.append("\"error\" : \"").append(error).append("\"\n");
+      jsonString.append("}");
+      return jsonString.toString();
     }
   }
 }

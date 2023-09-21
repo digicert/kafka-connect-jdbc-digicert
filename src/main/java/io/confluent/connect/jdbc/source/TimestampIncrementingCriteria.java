@@ -155,6 +155,12 @@ public class TimestampIncrementingCriteria {
         + " value = {}", DateTimeUtils.formatTimestamp(beginTime, timeZone),
         DateTimeUtils.formatTimestamp(endTime, timeZone), incOffset
     );
+    log.info(" Query parameters:\n"
+                    + " 1. End Time: {}\n"
+                    + " 2. Begin Time: {}\n"
+                    + " 3. Increment Offset: {}\n"
+                    + " 4. Begin Time: {}\n",
+            endTime, beginTime, incOffset, beginTime);
   }
 
   protected void setQueryParametersIncrementing(
@@ -164,6 +170,9 @@ public class TimestampIncrementingCriteria {
     Long incOffset = values.lastIncrementedValue();
     stmt.setLong(1, incOffset);
     log.debug("Executing prepared statement with incrementing value = {}", incOffset);
+    log.info("Query parameters:\n"
+                    + " 1. Increment Offset: {}\n",
+            incOffset);
   }
 
   protected void setQueryParametersTimestamp(
@@ -178,6 +187,10 @@ public class TimestampIncrementingCriteria {
         DateTimeUtils.formatTimestamp(beginTime, timeZone),
         DateTimeUtils.formatTimestamp(endTime, timeZone)
     );
+    log.info("Query parameters:\n"
+                    + " 1. Begin Time: {}\n"
+                    + ", 2. End Time: {}\n",
+            beginTime, endTime);
   }
 
   /**
