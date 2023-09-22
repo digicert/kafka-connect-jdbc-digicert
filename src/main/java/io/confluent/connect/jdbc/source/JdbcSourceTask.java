@@ -67,6 +67,7 @@ public class JdbcSourceTask extends SourceTask {
 
   private String bootstrapServer;
   private String errorTopic;
+  private String connectorName;
   private Producer<String, String> kafkaProducer;
 
   public JdbcSourceTask() {
@@ -93,7 +94,8 @@ public class JdbcSourceTask extends SourceTask {
 
     // Digicert
     bootstrapServer = properties.get("digicert.error.topic.bootstrap.servers");
-    errorTopic = properties.get("digicert.error.topic.name");
+    errorTopic = "src_jdbc_connector_error";
+    connectorName = properties.get("name");
     try {
       kafkaProducer = getKafkaProducer();
     }
@@ -451,6 +453,7 @@ public class JdbcSourceTask extends SourceTask {
             RecordError recordError = new RecordError();
             recordError.setError(ex.getMessage());
             recordError.setRecord(getErrorRecord(querier));
+            recordError.setConnectorName(connectorName);
             addErrorRecord(kafkaProducer, recordError);
           }
         }
@@ -645,8 +648,9 @@ public class JdbcSourceTask extends SourceTask {
   }
 
   public class RecordError {
-    String record;
-    String error;
+    private String record;
+    private String error;
+    private String connectorName;
 
     // Getter for the 'record' field
     public String getRecord() {
@@ -668,11 +672,22 @@ public class JdbcSourceTask extends SourceTask {
       this.error = error;
     }
 
+    // Getter for the 'connectorName' field
+    public String getConnectorName() {
+      return connectorName;
+    }
+
+    // Setter for the 'connectorName' field
+    public void setConnectorName(String connectorName) {
+      this.connectorName = connectorName;
+    }
+
     @Override
     public String toString() {
       // Construct a string manually with a newline after each field
       StringBuilder jsonString = new StringBuilder();
       jsonString.append("{\n");
+      jsonString.append("\"connector_name\" : \"").append(connectorName).append("\",\n");
       jsonString.append("\"record\" : \"").append(record).append("\",\n");
       jsonString.append("\"error\" : \"").append(error).append("\"\n");
       jsonString.append("}");
