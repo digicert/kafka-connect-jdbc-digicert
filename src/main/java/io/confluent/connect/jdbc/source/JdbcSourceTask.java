@@ -66,7 +66,7 @@ public class JdbcSourceTask extends SourceTask {
 
   int maxRetriesPerQuerier;
 
-  private final String ERROR_TOPIC = "src_jdbc_connector_error";
+  private final String ERROR_TOPIC = "src_dcom_jdbc_connector_error";
   private final String ERROR_TOPIC_BOOTSTRAP_SERVER_CONFIG = "digicert.error.topic.bootstrap.servers";
   private final String CONNECTOR_NAME_CONFIG = "name";
   private final String TOPIC_NAME_CONFIG = "topic.prefix";
@@ -456,7 +456,7 @@ public class JdbcSourceTask extends SourceTask {
           } catch (Exception ex) {
             // Digicert
             log.error("Transaction id : " + querier.resultSet.getString(TRANSACTION_ID_COLUMN_NAME)
-                    + " :: Exception: " + ex.getMessage());
+                    + " :: Exception: " + ex);
             RecordError recordError = new RecordError();
             recordError.setError(ex.getMessage());
             recordError.setRecord(getErrorRecord(querier));
@@ -556,7 +556,7 @@ public class JdbcSourceTask extends SourceTask {
 
   private void addErrorRecord(String key, RecordError message) {
     if (kafkaProducer == null) {
-      log.error("Kafka producer is null");
+      log.error("Kafka error producer is null");
       return;
     }
     try {
@@ -579,6 +579,7 @@ public class JdbcSourceTask extends SourceTask {
       log.info("Kafka producer is connected to topic: {} and partition: {}",info.topic(),info.partition());
     }
   }
+
   private Properties getProperties() {
     Properties props = new Properties();
     props.put(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG, StringSerializer.class.getName());
