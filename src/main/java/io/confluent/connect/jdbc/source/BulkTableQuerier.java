@@ -114,6 +114,12 @@ public class BulkTableQuerier extends TableQuerier {
     return new SourceRecord(partition, null, topic, record.schema(), record);
   }
 
+  // Digicert
+  @Override
+  public void setErrorRecordOffset(TableQuerier querier) {
+    //Not need to implement
+  }
+
   @Override
   public String toString() {
     return "BulkTableQuerier{" + "table='" + tableId + '\'' + ", query='" + query + '\''

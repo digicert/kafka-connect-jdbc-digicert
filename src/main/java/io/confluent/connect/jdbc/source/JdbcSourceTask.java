@@ -38,6 +38,7 @@ import java.sql.Connection;
 import java.sql.ResultSetMetaData;
 import java.sql.SQLException;
 import java.sql.SQLNonTransientException;
+import java.time.Instant;
 import java.util.*;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
@@ -65,9 +66,14 @@ public class JdbcSourceTask extends SourceTask {
 
   int maxRetriesPerQuerier;
 
-  private String bootstrapServer;
-  private String errorTopic;
+  private final String ERROR_TOPIC = "src_jdbc_connector_error";
+  private final String ERROR_TOPIC_BOOTSTRAP_SERVER_CONFIG = "digicert.error.topic.bootstrap.servers";
+  private final String CONNECTOR_NAME_CONFIG = "name";
+  private final String TOPIC_NAME_CONFIG = "topic.prefix";
+  private final String TRANSACTION_ID_COLUMN_NAME = "transaction_id";
+  private String errorTopicBootstrapServer;
   private String connectorName;
+  private String topicName;
   private Producer<String, String> kafkaProducer;
 
   public JdbcSourceTask() {
@@ -93,14 +99,14 @@ public class JdbcSourceTask extends SourceTask {
     }
 
     // Digicert
-    bootstrapServer = properties.get("digicert.error.topic.bootstrap.servers");
-    errorTopic = "src_jdbc_connector_error";
-    connectorName = properties.get("name");
+    errorTopicBootstrapServer = properties.get(ERROR_TOPIC_BOOTSTRAP_SERVER_CONFIG);
+    connectorName = properties.get(CONNECTOR_NAME_CONFIG);
+    topicName = properties.get(TOPIC_NAME_CONFIG);
     try {
       kafkaProducer = getKafkaProducer();
     }
     catch (Exception ex){
-      log.info("Error while creating kafka producer", ex);
+      log.error("Error while creating kafka producer for error topic", ex);
     }
 
     List<String> tables = config.getList(JdbcSourceTaskConfig.TABLES_CONFIG);
@@ -448,13 +454,18 @@ public class JdbcSourceTask extends SourceTask {
           try {
             results.add(querier.extractRecord());
           } catch (Exception ex) {
-            log.error("Transaction id : " + querier.resultSet.getString("transaction_id")
+            // Digicert
+            log.error("Transaction id : " + querier.resultSet.getString(TRANSACTION_ID_COLUMN_NAME)
                     + " :: Exception: " + ex.getMessage());
             RecordError recordError = new RecordError();
             recordError.setError(ex.getMessage());
             recordError.setRecord(getErrorRecord(querier));
             recordError.setConnectorName(connectorName);
-            addErrorRecord(kafkaProducer, recordError);
+            recordError.setTopicName(topicName);
+            recordError.setLogDate(Instant.now().toString());
+            //set offset for error record
+            querier.setErrorRecordOffset(querier);
+            addErrorRecord(querier.resultSet.getString(TRANSACTION_ID_COLUMN_NAME), recordError);
           }
         }
         querier.resetRetryCount();
@@ -526,16 +537,15 @@ public class JdbcSourceTask extends SourceTask {
     try {
       ResultSetMetaData metaData = querier.resultSet.getMetaData();
       int columnCount = metaData.getColumnCount();
+
       StringBuilder jsonLikeString = new StringBuilder("{\n");
       for (int i = 1; i <= columnCount; i++) {
         String columnName = metaData.getColumnName(i);
         Object columnValue = querier.resultSet.getObject(i);
-        // Append the column name and value to the JSON-like string
-        jsonLikeString.append("\"").append(columnName).append("\":\"").append(columnValue).append("\",\n");
+        jsonLikeString.append("\"").append(columnName).append("\" : \"").append(columnValue).append("\",\n");
       }
-      // Remove the trailing comma and close the JSON-like string
-      jsonLikeString.delete(jsonLikeString.length() - 2, jsonLikeString.length()); // Remove last comma and newline
-      jsonLikeString.append("\n}\n");
+      jsonLikeString.delete(jsonLikeString.length() - 2, jsonLikeString.length());
+      jsonLikeString.append("\n}");
       errorRecord = jsonLikeString.toString();
     }
     catch (Exception e){
@@ -543,25 +553,28 @@ public class JdbcSourceTask extends SourceTask {
     }
     return errorRecord;
   }
-  private void addErrorRecord(Producer<String, String> kafkaProducer, RecordError message) {
+
+  private void addErrorRecord(String key, RecordError message) {
     if (kafkaProducer == null) {
       log.error("Kafka producer is null");
       return;
     }
     try {
-      kafkaProducer.send(new ProducerRecord<>(errorTopic, message.toString()));
+      kafkaProducer.send(new ProducerRecord<>(ERROR_TOPIC, key, message.toString()));
     }
     catch (Exception ex){
       log.error("Unable to send message to kafka topic : {}", message.toString());
     }
   }
+
   private Producer<String, String> getKafkaProducer() {
     KafkaProducer<String, String> kafkaProducer = new KafkaProducer<>(getProperties());
     checkConnectivity(kafkaProducer);
     return kafkaProducer;
   }
+
   private void checkConnectivity(KafkaProducer<String, String> kafkaProducer) {
-    List<PartitionInfo> partitionInfos = kafkaProducer.partitionsFor(errorTopic);
+    List<PartitionInfo> partitionInfos = kafkaProducer.partitionsFor(ERROR_TOPIC);
     for( PartitionInfo info : partitionInfos){
       log.info("Kafka producer is connected to topic: {} and partition: {}",info.topic(),info.partition());
     }
@@ -570,7 +583,7 @@ public class JdbcSourceTask extends SourceTask {
     Properties props = new Properties();
     props.put(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG, StringSerializer.class.getName());
     props.put(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, StringSerializer.class.getName());
-    props.put(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, bootstrapServer);
+    props.put(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, errorTopicBootstrapServer);
     return props;
   }
 
@@ -651,45 +664,58 @@ public class JdbcSourceTask extends SourceTask {
     private String record;
     private String error;
     private String connectorName;
+    private String topicName;
+    private String logDate;
 
-    // Getter for the 'record' field
     public String getRecord() {
       return record;
     }
 
-    // Setter for the 'record' field
     public void setRecord(String record) {
       this.record = record;
     }
 
-    // Getter for the 'error' field
     public String getError() {
       return error;
     }
 
-    // Setter for the 'error' field
     public void setError(String error) {
       this.error = error;
     }
 
-    // Getter for the 'connectorName' field
     public String getConnectorName() {
       return connectorName;
     }
 
-    // Setter for the 'connectorName' field
     public void setConnectorName(String connectorName) {
       this.connectorName = connectorName;
     }
 
+    public String getTopicName() {
+      return topicName;
+    }
+
+    public void setTopicName(String topicName) {
+      this.topicName = topicName;
+    }
+
+    public String getLogDate() {
+      return logDate;
+    }
+
+    public void setLogDate(String logDate) {
+      this.logDate = logDate;
+    }
+
     @Override
     public String toString() {
-      // Construct a string manually with a newline after each field
       StringBuilder jsonString = new StringBuilder();
       jsonString.append("{\n");
       jsonString.append("\"connector_name\" : \"").append(connectorName).append("\",\n");
-      jsonString.append("\"record\" : \"").append(record).append("\",\n");
-      jsonString.append("\"error\" : \"").append(error).append("\"\n");
+      jsonString.append("\"topic_name\" : \"").append(topicName).append("\",\n");
+      jsonString.append("\"record\" : ").append(record).append(",\n");
+      jsonString.append("\"error\" : \"").append(error).append("\",\n");
+      jsonString.append("\"log_date\" : \"").append(logDate).append("\"\n");
       jsonString.append("}");
       return jsonString.toString();
     }

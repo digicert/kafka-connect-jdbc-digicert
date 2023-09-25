@@ -155,7 +155,7 @@ public class TimestampIncrementingCriteria {
         + " value = {}", DateTimeUtils.formatTimestamp(beginTime, timeZone),
         DateTimeUtils.formatTimestamp(endTime, timeZone), incOffset
     );
-    log.info(" Query parameters:\n"
+    log.debug(" Query parameters:\n"
                     + " 1. End Time: {}\n"
                     + " 2. Begin Time: {}\n"
                     + " 3. Increment Offset: {}\n"
@@ -170,7 +170,7 @@ public class TimestampIncrementingCriteria {
     Long incOffset = values.lastIncrementedValue();
     stmt.setLong(1, incOffset);
     log.debug("Executing prepared statement with incrementing value = {}", incOffset);
-    log.info("Query parameters:\n"
+    log.debug("Query parameters:\n"
                     + " 1. Increment Offset: {}\n",
             incOffset);
   }
@@ -187,7 +187,7 @@ public class TimestampIncrementingCriteria {
         DateTimeUtils.formatTimestamp(beginTime, timeZone),
         DateTimeUtils.formatTimestamp(endTime, timeZone)
     );
-    log.info("Query parameters:\n"
+    log.debug("Query parameters:\n"
                     + " 1. Begin Time: {}\n"
                     + ", 2. End Time: {}\n",
             beginTime, endTime);
@@ -312,6 +312,48 @@ public class TimestampIncrementingCriteria {
       builder.append(")");
     }
     return builder.toString();
+  }
+
+  // Digicert
+  public TimestampIncrementingOffset errorRecordOffsetValues(
+          TableQuerier querier,
+          TimestampIncrementingOffset previousOffset,
+          JdbcSourceConnectorConfig.TimestampGranularity timestampGranularity) throws Exception {
+    Timestamp extractedTimestamp = null;
+    if (hasTimestampColumns()) {
+      extractedTimestamp = errorRecordOffsetTimestamp(querier, timestampGranularity);
+      assert previousOffset == null || (previousOffset.getTimestampOffset() != null
+              && previousOffset.getTimestampOffset().compareTo(
+              extractedTimestamp) <= 0
+      );
+    }
+    Long extractedId = null;
+    if (hasIncrementedColumn()) {
+      extractedId = errorRecordOffsetIncrementedId(querier);
+      assert previousOffset == null || previousOffset.getIncrementingOffset() == -1L
+              || extractedId > previousOffset.getIncrementingOffset() || hasTimestampColumns();
+    }
+    if (extractedTimestamp == null || extractedId == null) {
+      throw new Exception("Unable to get error record timestamp or incrementing column value for offset");
+    }
+    return new TimestampIncrementingOffset(extractedTimestamp, extractedId);
+  }
+
+  protected Timestamp errorRecordOffsetTimestamp(TableQuerier querier, JdbcSourceConnectorConfig.TimestampGranularity timestampGranularity) throws SQLException {
+    for (ColumnId timestampColumn : timestampColumns) {
+      log.debug("Error record timestamp column: {}, value: {}", timestampColumn.name(), querier.resultSet.getObject(timestampColumn.name()));
+      Timestamp ts = timestampGranularity.toTimestamp.apply(querier.resultSet.getObject(timestampColumn.name()), timeZone);
+      if (ts != null) {
+        return ts;
+      }
+    }
+    return null;
+  }
+
+  protected Long errorRecordOffsetIncrementedId(TableQuerier querier) throws SQLException {
+    log.debug("Error record incrementing column: {}, value: {}", incrementingColumn.name(), querier.resultSet.getObject(incrementingColumn.name()));
+    Long id = querier.resultSet.getLong(incrementingColumn.name());
+    return id;
   }
 
   protected void timestampIncrementingWhereClause(ExpressionBuilder builder) {

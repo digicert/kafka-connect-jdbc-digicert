@@ -115,6 +115,9 @@ abstract class TableQuerier implements Comparable<TableQuerier> {
 
   public abstract SourceRecord extractRecord() throws SQLException;
 
+  // Digicert
+  public abstract void setErrorRecordOffset(TableQuerier querier);
+
   public void reset(long now, boolean resetOffset) {
     closeResultSetQuietly();
     closeStatementQuietly();
