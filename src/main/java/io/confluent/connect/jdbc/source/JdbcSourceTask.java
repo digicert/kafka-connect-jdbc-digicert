@@ -455,11 +455,10 @@ public class JdbcSourceTask extends SourceTask {
             results.add(querier.extractRecord());
           } catch (Exception ex) {
             // Digicert
-            log.error("Transaction id : " + querier.resultSet.getString(TRANSACTION_ID_COLUMN_NAME)
-                    + " :: Exception: " + ex);
             RecordError recordError = new RecordError();
-            recordError.setError(ex.getMessage());
             recordError.setRecord(getErrorRecord(querier));
+            log.error("Transaction id : {},  :: Error Record: {},  :: Exception: ", querier.resultSet.getString(TRANSACTION_ID_COLUMN_NAME), recordError.getRecord(), ex);
+            recordError.setError(ex.getMessage());
             recordError.setConnectorName(connectorName);
             recordError.setTopicName(topicName);
             recordError.setLogDate(Instant.now().toString());
@@ -544,7 +543,9 @@ public class JdbcSourceTask extends SourceTask {
         Object columnValue = querier.resultSet.getObject(i);
         jsonLikeString.append("\"").append(columnName).append("\" : \"").append(columnValue).append("\",\n");
       }
-      jsonLikeString.delete(jsonLikeString.length() - 2, jsonLikeString.length());
+      if (columnCount > 0) {
+        jsonLikeString.delete(jsonLikeString.length() - 2, jsonLikeString.length());
+      }
       jsonLikeString.append("\n}");
       errorRecord = jsonLikeString.toString();
     }
@@ -556,7 +557,13 @@ public class JdbcSourceTask extends SourceTask {
 
   private void addErrorRecord(String key, RecordError message) {
     if (kafkaProducer == null) {
-      log.error("Kafka error producer is null");
+      log.error("Kafka error producer is null. Retrying...");
+      try {
+        kafkaProducer = getKafkaProducer();
+      }
+      catch (Exception ex){
+        log.error("Error while creating kafka producer for error topic", ex);
+      }
       return;
     }
     try {

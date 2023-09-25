@@ -333,15 +333,19 @@ public class TimestampIncrementingCriteria {
       assert previousOffset == null || previousOffset.getIncrementingOffset() == -1L
               || extractedId > previousOffset.getIncrementingOffset() || hasTimestampColumns();
     }
-    if (extractedTimestamp == null || extractedId == null) {
-      throw new Exception("Unable to get error record timestamp or incrementing column value for offset");
+    if (extractedId == null) {
+      throw new Exception("Unable to get error record incrementing column value for offset");
     }
+    if (extractedTimestamp == null) {
+      throw new Exception("Unable to get error record timestamp column value for offset");
+    }
+
     return new TimestampIncrementingOffset(extractedTimestamp, extractedId);
   }
 
   protected Timestamp errorRecordOffsetTimestamp(TableQuerier querier, JdbcSourceConnectorConfig.TimestampGranularity timestampGranularity) throws SQLException {
     for (ColumnId timestampColumn : timestampColumns) {
-      log.debug("Error record timestamp column: {}, value: {}", timestampColumn.name(), querier.resultSet.getObject(timestampColumn.name()));
+      log.error("Error record timestamp column: {}, value: {}", timestampColumn.name(), querier.resultSet.getObject(timestampColumn.name()));
       Timestamp ts = timestampGranularity.toTimestamp.apply(querier.resultSet.getObject(timestampColumn.name()), timeZone);
       if (ts != null) {
         return ts;
@@ -351,7 +355,7 @@ public class TimestampIncrementingCriteria {
   }
 
   protected Long errorRecordOffsetIncrementedId(TableQuerier querier) throws SQLException {
-    log.debug("Error record incrementing column: {}, value: {}", incrementingColumn.name(), querier.resultSet.getObject(incrementingColumn.name()));
+    log.error("Error record incrementing column: {}, value: {}", incrementingColumn.name(), querier.resultSet.getObject(incrementingColumn.name()));
     Long id = querier.resultSet.getLong(incrementingColumn.name());
     return id;
   }
