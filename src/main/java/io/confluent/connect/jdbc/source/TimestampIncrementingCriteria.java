@@ -333,10 +333,10 @@ public class TimestampIncrementingCriteria {
       assert previousOffset == null || previousOffset.getIncrementingOffset() == -1L
               || extractedId > previousOffset.getIncrementingOffset() || hasTimestampColumns();
     }
-    if (extractedId == null) {
+    if (extractedId == null && hasIncrementedColumn()) {
       throw new Exception("Unable to get error record incrementing column value for offset");
     }
-    if (extractedTimestamp == null) {
+    if (extractedTimestamp == null && hasTimestampColumns()) {
       throw new Exception("Unable to get error record timestamp column value for offset");
     }
 
