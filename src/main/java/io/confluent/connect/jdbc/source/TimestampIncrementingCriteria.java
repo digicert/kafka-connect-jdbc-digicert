@@ -326,18 +326,19 @@ public class TimestampIncrementingCriteria {
               && previousOffset.getTimestampOffset().compareTo(
               extractedTimestamp) <= 0
       );
+      if (extractedTimestamp == null) {
+        throw new Exception("Unable to get error record timestamp column value for offset");
+      }
     }
     Long extractedId = null;
     if (hasIncrementedColumn()) {
       extractedId = errorRecordOffsetIncrementedId(querier);
       assert previousOffset == null || previousOffset.getIncrementingOffset() == -1L
               || extractedId > previousOffset.getIncrementingOffset() || hasTimestampColumns();
-    }
-    if (extractedId == null && hasIncrementedColumn()) {
-      throw new Exception("Unable to get error record incrementing column value for offset");
-    }
-    if (extractedTimestamp == null && hasTimestampColumns()) {
-      throw new Exception("Unable to get error record timestamp column value for offset");
+
+      if (extractedId == null) {
+        throw new Exception("Unable to get error record incrementing column value for offset");
+      }
     }
 
     return new TimestampIncrementingOffset(extractedTimestamp, extractedId);
