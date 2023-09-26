@@ -455,16 +455,11 @@ public class JdbcSourceTask extends SourceTask {
             results.add(querier.extractRecord());
           } catch (Exception ex) {
             // Digicert
-            RecordError recordError = new RecordError();
-            recordError.setRecord(getErrorRecord(querier));
+            RecordError recordError = createRecordError(ex.getMessage(), getErrorRecord(querier));
             log.error("Transaction id : {},  :: Error Record: {},  :: Exception: ", querier.resultSet.getString(TRANSACTION_ID_COLUMN_NAME), recordError.getRecord(), ex);
-            recordError.setError(ex.getMessage());
-            recordError.setConnectorName(connectorName);
-            recordError.setTopicName(topicName);
-            recordError.setLogDate(Instant.now().toString());
             //set offset for error record
             querier.setErrorRecordOffset(querier);
-            addErrorRecord(querier.resultSet.getString(TRANSACTION_ID_COLUMN_NAME), recordError);
+            sendErrorRecord(querier.resultSet.getString(TRANSACTION_ID_COLUMN_NAME), recordError);
           }
         }
         querier.resetRetryCount();
@@ -494,8 +489,12 @@ public class JdbcSourceTask extends SourceTask {
         log.debug("Returning {} records for {}", results.size(), querier);
         return results;
       } catch (SQLNonTransientException sqle) {
-        log.error("Non-transient SQL exception while running query for table: {}",
-            querier, sqle);
+        //sending message to error topic
+        String uuid = UUID.randomUUID().toString();
+        RecordError recordError = createRecordError(sqle.getMessage(), null);
+        sendErrorRecord(uuid, recordError);
+        log.error("Transaction id : {}, Non-transient SQL exception while running query for table: {}",
+            uuid, querier, sqle);
         resetAndRequeueHead(querier, true);
         // This task has failed, so close any resources (may be reopened if needed) before throwing
         closeResources();
@@ -518,7 +517,11 @@ public class JdbcSourceTask extends SourceTask {
         querier.incrementRetryCount();
         return null;
       } catch (Throwable t) {
-        log.error("Failed to run query for table: {}", querier, t);
+        //sending message to error topic
+        String uuid = UUID.randomUUID().toString();
+        RecordError recordError = createRecordError(t.getMessage(), null);
+        sendErrorRecord(uuid, recordError);
+        log.error("Transaction id : {}, Failed to run query for table: {}", uuid, querier, t);
         resetAndRequeueHead(querier, true);
         // This task has failed, so close any resources (may be reopened if needed) before throwing
         closeResources();
@@ -531,6 +534,16 @@ public class JdbcSourceTask extends SourceTask {
   }
 
   // Digicert
+
+  private RecordError createRecordError(String exception, String record){
+    RecordError recordError = new RecordError();
+    recordError.setConnectorName(connectorName);
+    recordError.setTopicName(topicName);
+    recordError.setRecord(record);
+    recordError.setError(exception);
+    recordError.setLogDate(Instant.now().toString());
+    return recordError;
+  }
   private String getErrorRecord(TableQuerier querier){
     String errorRecord = null;
     try {
@@ -555,7 +568,7 @@ public class JdbcSourceTask extends SourceTask {
     return errorRecord;
   }
 
-  private void addErrorRecord(String key, RecordError message) {
+  private void sendErrorRecord(String key, RecordError message) {
     if (kafkaProducer == null) {
       log.error("Kafka error producer is null. Retrying...");
       try {
@@ -714,6 +727,7 @@ public class JdbcSourceTask extends SourceTask {
     public void setLogDate(String logDate) {
       this.logDate = logDate;
     }
+
 
     @Override
     public String toString() {
