@@ -237,7 +237,7 @@ public class TimestampIncrementingTableQuerier extends TableQuerier implements C
     try {
       offset = criteria.errorRecordOffsetValues(querier, offset, timestampGranularity);
     } catch (Exception e) {
-      log.error("Error while setting the offset for the error record : {}", e);
+      log.error("Error while setting the offset for the error record : ", e);
     }
   }
 

@@ -493,7 +493,7 @@ public class JdbcSourceTask extends SourceTask {
         String uuid = UUID.randomUUID().toString();
         RecordError recordError = createRecordError(sqle.getMessage(), null);
         sendErrorRecord(uuid, recordError);
-        log.error("Transaction id : {}, :: Exception: Non-transient SQL exception while running query for table: {}",
+        log.error("Transaction id : {}, :: Non-transient SQL exception while running query for table: {}, :: Exception:",
             uuid, querier, sqle);
         resetAndRequeueHead(querier, true);
         // This task has failed, so close any resources (may be reopened if needed) before throwing
@@ -521,7 +521,7 @@ public class JdbcSourceTask extends SourceTask {
         String uuid = UUID.randomUUID().toString();
         RecordError recordError = createRecordError(t.getMessage(), null);
         sendErrorRecord(uuid, recordError);
-        log.error("Transaction id : {}, :: Exception: Failed to run query for table: {}", uuid, querier, t);
+        log.error("Transaction id : {}, :: Failed to run query for table: {}, :: Exception:", uuid, querier, t);
         resetAndRequeueHead(querier, true);
         // This task has failed, so close any resources (may be reopened if needed) before throwing
         closeResources();
