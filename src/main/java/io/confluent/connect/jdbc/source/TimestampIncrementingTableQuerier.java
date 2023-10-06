@@ -231,6 +231,16 @@ public class TimestampIncrementingTableQuerier extends TableQuerier implements C
     return new SourceRecord(partition, offset.toMap(), topic, record.schema(), record);
   }
 
+  // Digicert
+  @Override
+  public void setErrorRecordOffset(TableQuerier querier) {
+    try {
+      offset = criteria.errorRecordOffsetValues(querier, offset, timestampGranularity);
+    } catch (Exception e) {
+      log.error("Error while setting the offset for the error record : ", e);
+    }
+  }
+
   @Override
   public void reset(long now, boolean resetOffset) {
     // the task is being reset, any uncommitted offset needs to be reset as well
